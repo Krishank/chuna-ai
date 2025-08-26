@@ -1,3 +1,6 @@
 [
-  { "name": "products_list", "description": "List products", "method": "GET", "url": "/todos/1" }
+  { "name": "offers", "description": "List of Offers", "method": "GET", "url": "/offers" },
+  { "name": "products_list", "description": "List of products", "method": "GET", "url": "products" }
 ]
+
+
