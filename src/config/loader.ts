@@ -1,6 +1,23 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+// Middleware types - functions exported from middleware/index.ts
+export type PreMiddleware = (spec: HttpRequestSpec, context: MiddlewareContext) => Promise<HttpRequestSpec> | HttpRequestSpec;
+export type PostMiddleware = (result: { status: number; headers: Record<string, string | string[]>; body: unknown }, context: MiddlewareContext) => Promise<{ status: number; headers: Record<string, string | string[]>; body: unknown }> | { status: number; headers: Record<string, string | string[]>; body: unknown };
+
+export type MiddlewareContext = {
+  toolName: string;
+  args: Record<string, unknown>;
+};
+
+export type HttpRequestSpec = {
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+  url: string;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  body?: unknown;
+};
+
 export type ToolConfig = {
   name: string;
   description?: string;
@@ -9,6 +26,8 @@ export type ToolConfig = {
   headers?: Record<string, string>;
   query?: Record<string, string>;
   body?: unknown;
+  preMiddleware?: string[];
+  postMiddleware?: string[];
 };
 
 export type ChunaConfig = {
@@ -43,14 +62,19 @@ async function readJson(filePath: string): Promise<any> {
 export async function loadConfigFromPath(configPath: string): Promise<ChunaConfig> {
   const stat = await fs.stat(configPath);
   if (stat.isDirectory()) {
-    const mainPath = path.join(configPath, 'main.json');
     const toolsPath = path.join(configPath, 'tools.json');
-    const main: Partial<ChunaConfig> = (await readJson(mainPath)) ?? {};
-    const tools: ToolConfig[] = (await readJson(toolsPath)) ?? [];
+    const parsed = await readJson(toolsPath);
+    // Support two shapes:
+    // 1) { baseUrl?: string, tools: ToolConfig[] }
+    // 2) ToolConfig[] (legacy) -> wrap into { tools }
+    if (Array.isArray(parsed)) {
+      return { version: 1, tools: parsed } as ChunaConfig;
+    }
+    const obj = (parsed ?? {}) as Partial<ChunaConfig> & { tools?: ToolConfig[] };
     return {
-      version: 1,
-      tools,
-      ...main,
+      version: obj.version ?? 1,
+      baseUrl: obj.baseUrl,
+      tools: obj.tools ?? [],
     } as ChunaConfig;
   }
   return (await readJson(configPath)) as ChunaConfig;

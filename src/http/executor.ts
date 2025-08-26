@@ -1,14 +1,7 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { URL } from 'node:url';
-
-export type HttpRequestSpec = {
-  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
-  url: string;
-  headers?: Record<string, string>;
-  query?: Record<string, string>;
-  body?: unknown;
-};
+import type { HttpRequestSpec } from '../config/loader.js';
 
 export async function executeHttp(spec: HttpRequestSpec): Promise<{ status: number; headers: Record<string, string | string[]>; body: unknown }> {
   const base = new URL(spec.url);

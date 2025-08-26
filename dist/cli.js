@@ -2,7 +2,7 @@
 import {
   loadConfigFromPath,
   startMcpServer
-} from "./chunk-SIDCB3ZG.js";
+} from "./chunk-4YPHFSTZ.js";
 
 // src/cli.ts
 function printHelp() {

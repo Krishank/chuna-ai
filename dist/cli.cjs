@@ -6,6 +6,10 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -76,26 +80,95 @@ async function executeHttp(spec) {
   });
 }
 
+// src/middleware/index.ts
+var middleware_exports = {};
+__export(middleware_exports, {
+  addAuthHeader: () => addAuthHeader,
+  addTimestamp: () => addTimestamp,
+  logRequest: () => logRequest,
+  logResponse: () => logResponse,
+  validateResponse: () => validateResponse
+});
+var addAuthHeader = (spec, context) => {
+  return {
+    ...spec,
+    headers: {
+      ...spec.headers,
+      "Authorization": "Bearer example-token"
+    }
+  };
+};
+var logRequest = async (spec, context) => {
+  console.error(`[${context.toolName}] ${spec.method} ${spec.url}`);
+  return spec;
+};
+var logResponse = async (result, context) => {
+  console.error(`[${context.toolName}] Response: ${result.status}`);
+  return result;
+};
+var addTimestamp = (spec, context) => {
+  return {
+    ...spec,
+    headers: {
+      ...spec.headers,
+      "X-Timestamp": (/* @__PURE__ */ new Date()).toISOString()
+    }
+  };
+};
+var validateResponse = async (result, context) => {
+  if (result.status >= 400) {
+    throw new Error(`HTTP ${result.status}: ${JSON.stringify(result.body)}`);
+  }
+  return result;
+};
+
 // src/mcp/server.ts
-function buildToolFromConfig(tool, baseUrl) {
+function getMiddlewareFunction(name) {
+  const fn = middleware_exports[name];
+  if (!fn || typeof fn !== "function") {
+    throw new Error(`Middleware function "${name}" not found. Available: ${Object.keys(middleware_exports).join(", ")}`);
+  }
+  return fn;
+}
+function buildToolFromConfig(tool) {
   return {
     name: tool.name,
     description: tool.description,
     handler: async (args) => {
-      const url = tool.url.startsWith("http") ? tool.url : baseUrl ? new URL(tool.url, baseUrl).toString() : tool.url;
-      const result = await executeHttp({
+      if (!/^https?:\/\//i.test(tool.url)) {
+        throw new Error(`Tool ${tool.name} requires an absolute URL (got: ${tool.url})`);
+      }
+      const context = {
+        toolName: tool.name,
+        args
+      };
+      let httpSpec = {
         method: tool.method,
-        url,
+        url: tool.url,
         headers: tool.headers,
         query: tool.query,
         body: tool.body
-      });
-      return { content: { status: result.status, headers: result.headers, body: result.body } };
+      };
+      if (tool.preMiddleware) {
+        for (const middlewareName of tool.preMiddleware) {
+          const preFn = getMiddlewareFunction(middlewareName);
+          httpSpec = await preFn(httpSpec, context);
+        }
+      }
+      const result = await executeHttp(httpSpec);
+      let finalResult = result;
+      if (tool.postMiddleware) {
+        for (const middlewareName of tool.postMiddleware) {
+          const postFn = getMiddlewareFunction(middlewareName);
+          finalResult = await postFn(finalResult, context);
+        }
+      }
+      return { content: finalResult };
     }
   };
 }
 async function startMcpServer(options) {
-  const tools = options.config.tools.map((t) => buildToolFromConfig(t, options.config.baseUrl));
+  const tools = options.config.tools.map((t) => buildToolFromConfig(t));
   process.stdin.setEncoding("utf8");
   let buffer = "";
   async function handleMessage(message) {
@@ -181,14 +254,16 @@ async function readJson(filePath) {
 async function loadConfigFromPath(configPath) {
   const stat = await import_promises.default.stat(configPath);
   if (stat.isDirectory()) {
-    const mainPath = import_node_path.default.join(configPath, "main.json");
     const toolsPath = import_node_path.default.join(configPath, "tools.json");
-    const main2 = await readJson(mainPath) ?? {};
-    const tools = await readJson(toolsPath) ?? [];
+    const parsed = await readJson(toolsPath);
+    if (Array.isArray(parsed)) {
+      return { version: 1, tools: parsed };
+    }
+    const obj = parsed ?? {};
     return {
-      version: 1,
-      tools,
-      ...main2
+      version: obj.version ?? 1,
+      baseUrl: obj.baseUrl,
+      tools: obj.tools ?? []
     };
   }
   return await readJson(configPath);

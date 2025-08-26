@@ -1,6 +1,18 @@
 [
-  { "name": "offers", "description": "List of Offers", "method": "GET", "url": "/offers" },
-  { "name": "products_list", "description": "List of products", "method": "GET", "url": "products" }
+  {
+    "name": "products_list",
+    "description": "List products with auth and logging",
+    "method": "GET",
+    "url": "https://krishank.wiremockapi.cloud/products",
+    "preMiddleware": ["addAuthHeader", "logRequest", "addTimestamp"],
+    "postMiddleware": ["logResponse", "validateResponse"]
+  },
+  {
+    "name": "offers",
+    "description": "List offers with just logging",
+    "method": "GET", 
+    "url": "https://krishank.wiremockapi.cloud/offers",
+    "preMiddleware": ["logRequest"],
+    "postMiddleware": ["logResponse"]
+  }
 ]
-
-

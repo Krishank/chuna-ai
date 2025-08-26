@@ -1,5 +1,6 @@
 import { executeHttp } from '../http/executor.js';
-import type { ChunaConfig, ToolConfig } from '../config/loader.js';
+import type { ChunaConfig, ToolConfig, PreMiddleware, PostMiddleware, MiddlewareContext, HttpRequestSpec } from '../config/loader.js';
+import * as middleware from '../middleware/index.js';
 
 type StartOptions = { config: ChunaConfig };
 
@@ -10,26 +11,64 @@ type McpTool = {
   handler: (args: Record<string, unknown>) => Promise<{ content: unknown }>;
 };
 
-function buildToolFromConfig(tool: ToolConfig, baseUrl?: string): McpTool {
+function getMiddlewareFunction(name: string): PreMiddleware | PostMiddleware {
+  const fn = (middleware as any)[name];
+  if (!fn || typeof fn !== 'function') {
+    throw new Error(`Middleware function "${name}" not found. Available: ${Object.keys(middleware).join(', ')}`);
+  }
+  return fn;
+}
+
+function buildToolFromConfig(tool: ToolConfig): McpTool {
   return {
     name: tool.name,
     description: tool.description,
     handler: async (args) => {
-      const url = tool.url.startsWith('http') ? tool.url : (baseUrl ? new URL(tool.url, baseUrl).toString() : tool.url);
-      const result = await executeHttp({
+      if (!/^https?:\/\//i.test(tool.url)) {
+        throw new Error(`Tool ${tool.name} requires an absolute URL (got: ${tool.url})`);
+      }
+
+      const context: MiddlewareContext = {
+        toolName: tool.name,
+        args,
+      };
+
+      // Start with the base HTTP spec
+      let httpSpec: HttpRequestSpec = {
         method: tool.method,
-        url,
+        url: tool.url,
         headers: tool.headers,
         query: tool.query,
         body: tool.body,
-      });
-      return { content: { status: result.status, headers: result.headers, body: result.body } };
+      };
+
+      // Apply pre-middleware
+      if (tool.preMiddleware) {
+        for (const middlewareName of tool.preMiddleware) {
+          const preFn = getMiddlewareFunction(middlewareName) as PreMiddleware;
+          httpSpec = await preFn(httpSpec, context);
+        }
+      }
+
+      // Execute HTTP request
+      const result = await executeHttp(httpSpec);
+
+      // Apply post-middleware
+      let finalResult = result;
+      if (tool.postMiddleware) {
+        for (const middlewareName of tool.postMiddleware) {
+          const postFn = getMiddlewareFunction(middlewareName) as PostMiddleware;
+          finalResult = await postFn(finalResult, context);
+        }
+      }
+
+      return { content: finalResult };
     },
   };
 }
 
 export async function startMcpServer(options: StartOptions): Promise<void> {
-  const tools = options.config.tools.map((t) => buildToolFromConfig(t, options.config.baseUrl));
+  const tools = options.config.tools.map((t) => buildToolFromConfig(t));
 
   // Minimal MCP stdio protocol shim: register and handle tool calls.
   // For v1, support a tiny subset sufficient for Cursor/Claude MCP clients.
@@ -94,5 +133,3 @@ export async function startMcpServer(options: StartOptions): Promise<void> {
     }
   });
 }
-
-
